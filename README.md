@@ -26,11 +26,12 @@ References:
 Some other C libraries that looked neat when I was searching for ones that might 
 fit the need of this library are:
 
+
 [JSMN minimalistic JSON parser](http://zserge.com/jsmn.html)
 [Lightweight JSON Parsing in C](http://www.cis.rit.edu/~krz/hacks/jsoncvt/) 
 
 The following library seems to do EXACTLY what this one does, but does not
 appear to be in a public repository as of this writing. (12/2016)
 
-(jWrite - a really simple JSON writer in C)[https://www.codeproject.com/articles/887604/jwrite-a-really-simple-json-writer-in-c]
+[jWrite - a really simple JSON writer in C](https://www.codeproject.com/articles/887604/jwrite-a-really-simple-json-writer-in-c)
 
