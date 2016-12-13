@@ -29,6 +29,7 @@ void json_init_stream(json_stream_struct *js, int human_readable, FILE *out_file
   js->stack_depth = 0; /* Stack depth counting starts at 1. */
   js->out = out_file;
   strcpy(js->error_string, "");
+  js->string_sanitize_fn = NULL;
 };
 
 
@@ -74,11 +75,11 @@ void new_element(json_stream_struct *js) {
 
 /* Utility function. Permit a callback for string sanitization to be defined. 
    NULL by default. (TODO: Are there C/C++ issues here?) */
-void (*string_sanitize_fn)(char *str) = NULL;
+/*void (*string_sanitize_fn)(char *str) = NULL;*/
 
-void sanitize_string(char *str) {
-  if(string_sanitize_fn) {
-    (*string_sanitize_fn)(str);
+void sanitize_string(json_stream_struct *js, char *str) {
+  if(js->string_sanitize_fn) {
+    (*(js->string_sanitize_fn))(str);
   }
 }
 
@@ -135,7 +136,7 @@ int json_start_object_named(json_stream_struct *js, char *name) {
 
   /* Indent and print the name and open brace. */
   do_indent(js); 
-  sanitize_string(name);
+  sanitize_string(js, name);
   fprintf(js->out, "\"%s\": {", name);
 
   /* Record that a new object has been opened. */
@@ -197,7 +198,7 @@ int json_start_array_named(json_stream_struct *js, char *name) {
 
   /* Indent and print the name and open bracket. */
   do_indent(js); 
-  sanitize_string(name);
+  sanitize_string(js, name);
   fprintf(js->out, "\"%s\": [", name);
 
   /* Record that a new array has been opened. */
@@ -263,11 +264,11 @@ int json_write_value(json_stream_struct *js, JSON_TYPE value_type, char *value) 
 
   switch(value_type) {
   case JSON_STRING:
-    sanitize_string(value);
+    sanitize_string(js, value);
     fprintf(js->out, "\"%s\"", value);
     break;
   case JSON_NUMBER:
-    sanitize_string(value);
+    sanitize_string(js, value);
     fprintf(js->out, "%s", value);
     break;
   case JSON_TRUE:
@@ -307,13 +308,13 @@ int json_write_pair(json_stream_struct *js, char *name, JSON_TYPE value_type, ch
 
   switch(value_type) {
   case JSON_STRING:
-    sanitize_string(name);
-    sanitize_string(value);
+    sanitize_string(js, name);
+    sanitize_string(js, value);
     fprintf(js->out, "\"%s\": \"%s\"", name, value);
     break;
   case JSON_NUMBER:
-    sanitize_string(name);
-    sanitize_string(value);
+    sanitize_string(js, name);
+    sanitize_string(js, value);
     fprintf(js->out, "\"%s\": %s", name, value);
     break;
   case JSON_TRUE:

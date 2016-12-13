@@ -84,6 +84,8 @@ typedef struct {
   /* Most recent error description. */
   char error_string[MAX_ERROR_STRING_LENGTH];
 
+  /* Permit registration of a global function to sanitize text strings. */
+  void (*string_sanitize_fn)(char *str);
 } json_stream_struct;
 
 /* Helper function to initialize a stream tracking object. */
@@ -124,8 +126,5 @@ int json_write_pair(json_stream_struct *js, char *name, JSON_TYPE value_type, ch
 
 /* Close all open objects and arrays, terminating the file. */
 int json_end_file(json_stream_struct *js);
-
-/* Permit registration of a global function to sanitize text strings. */
-void (*string_sanitize_fn)(char *str);
 
 #endif
