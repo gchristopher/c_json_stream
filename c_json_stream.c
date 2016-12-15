@@ -20,7 +20,7 @@ pairs, elements), but does not enforce JSON string or number formatting rules.
 
 
 
-/* Helper function to initialize a stream tracking object. */
+/* Function to initialize a stream tracking object. */
 void json_init_stream(json_stream_struct *js, int human_readable, FILE *out_file) {
   js->human_readable = human_readable;
   strcpy(js->indent_token, "  ");
@@ -34,41 +34,63 @@ void json_init_stream(json_stream_struct *js, int human_readable, FILE *out_file
 
 
 
-/* Utility function to print human-readable indentation. */
-void js_newline(json_stream_struct *js) {
-  /* If this is the start of a new file, do not preceed with a newline. */
-  if(js->file_started != 0 && js->human_readable != 0) {
-    fprintf(js->out, "\n");
+/* Either write a string to a file or append it to the stream buffer. */
+int write_str(json_stream_struct *js, const char *str) {
+  if(js->out) {
+    fprintf(js->out, str);
+    return 0;
   }
+  if(strlen(js->stream_buffer) + strlen(str) >= JSON_STRING_BUFFER_LEN) {
+    strcpy(js->error_string, "Stream buffer too small for the current write operation.");
+    return -1;
+  }
+  strcat(js->stream_buffer, str);
+  return 0;
 }
 
 
 
 /* Utility function to print human-readable indentation. */
-void do_indent(json_stream_struct *js) {
-  int ii;
+int js_newline(json_stream_struct *js) {
+  /* If this is the start of a new file, do not preceed with a newline. */
+  if(js->file_started != 0 && js->human_readable != 0) {
+    return(write_str(js, "\n"));
+  }
+  return 0;
+}
+
+
+
+/* Utility function to print human-readable indentation. */
+int do_indent(json_stream_struct *js) {
+  int ii, status;
   if(js->file_started != 0 && js->human_readable != 0) {
     for(ii = 0; ii < js->stack_depth; ++ii) {
-      fprintf(js->out, js->indent_token);
+      status = write_str(js, js->indent_token);
+      if(status) return status;
     }
   }
+  return 0;
 }
 
 
 
 /* Utility function to print a comma when needed and record that an element has 
    been printed inside the current context. */
-void new_element(json_stream_struct *js) {
+int new_element(json_stream_struct *js) {
+  int status;
   /* Element names from the JSON structure are abused here because they make
      readable labels. */
 
   /* JSON_ELEMENT indicates that this is not the first element of an object or array. */
   if(js->prior_element == JSON_ELEMENT) {
-    fprintf(js->out, ",");
+    status = write_str(js, ",");
+    if(status) return status;
   } else { /* JSON_NULL indicates that there was not a prior element. */
     js->prior_element = JSON_ELEMENT;
   }
-  js_newline(js);
+  status = js_newline(js);
+  return status;
 }
 
 
@@ -90,23 +112,29 @@ void sanitize_string(json_stream_struct *js, char *str) {
 /* Start a brace-enclosed object. 
    An object may only begin in an array context or when no context has yet been started. (The beginning of a file) */
 int json_start_object(json_stream_struct *js) {
+  int status;
+
   if(js->file_started != 0) {
-    if(js->stack_depth <= 0 || js->object_array_stack[js->stack_depth - 1] != JSON_ARRAY) {
-      strcpy(js->error_string, "Attempted to open an object when not starting a file or in array context.");
-      return -1;
-    } 
-  } else {
-    if(js->prior_element != JSON_NULL) {
+    if(js->stack_depth <= 0) {
       strcpy(js->error_string, "Attempted to open an object when file is already complete.");
       return -1;
     }
+    if(js->object_array_stack[js->stack_depth - 1] != JSON_ARRAY) {
+      strcpy(js->error_string, "Attempted to open an object when not starting a file or in array context.");
+      return -1;
+    } 
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
+  strcpy(js->stream_buffer, "");
+
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
 
   /* Indent and print the open brace. */
-  do_indent(js); 
-  fprintf(js->out, "{");
+  status = do_indent(js); 
+  if(status) return status;
+  status = write_str(js, "{");
+  if(status) return status;
 
   /* Record that a new object has been opened. */
   js->prior_element = JSON_NULL;
@@ -122,6 +150,8 @@ int json_start_object(json_stream_struct *js) {
 /* Start an named object. (A name: value pair where the value is a new object.)
    Must be in an object or array context. */
 int json_start_object_named(json_stream_struct *js, char *name) {
+  int status;
+
   if(js->stack_depth <= 0) {
     strcpy(js->error_string, "Attempted to start a named object when no context is open.");
     return -1;
@@ -132,12 +162,21 @@ int json_start_object_named(json_stream_struct *js, char *name) {
     return -1;
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
+  strcpy(js->stream_buffer, "");
+
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
 
   /* Indent and print the name and open brace. */
-  do_indent(js); 
+  status = do_indent(js); 
+  if(status) return status;
+
   sanitize_string(js, name);
-  fprintf(js->out, "\"%s\": {", name);
+  status = write_str(js, "\"");
+  status = status?status:write_str(js, name);
+  status = status?status:write_str(js, "\": {");
+  if(status) return status;
+  // ggg fprintf(js->out, "\"%s\": {", name);
 
   /* Record that a new object has been opened. */
   js->prior_element = JSON_NULL;
@@ -152,23 +191,29 @@ int json_start_object_named(json_stream_struct *js, char *name) {
 /* Start a bracket-enclosed array.
    An array may only begin in an array context or when no context has yet been started. (The beginning of a file) */
 int json_start_array(json_stream_struct *js) {
+  int status;
+
   if(js->file_started != 0) {
-    if(js->stack_depth <= 0 || js->object_array_stack[js->stack_depth - 1] != JSON_ARRAY) {
-      strcpy(js->error_string, "Attempted to open an array when not starting a file or in array context.");
-      return -1;
-    } 
-  } else {
-    if(js->prior_element != JSON_NULL) {
+    if(js->stack_depth <= 0) {
       strcpy(js->error_string, "Attempted to open an array when file is already complete.");
       return -1;
     }
+    if(js->object_array_stack[js->stack_depth - 1] != JSON_ARRAY) {
+      strcpy(js->error_string, "Attempted to open an array when not starting a file or in array context.");
+      return -1;
+    } 
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
+  strcpy(js->stream_buffer, "");
+
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
 
   /* Indent and print the open bracket. */
-  do_indent(js); 
-  fprintf(js->out, "[");
+  status = do_indent(js); 
+  if(status) return status;
+  status = write_str(js, "[");
+  if(status) return status;
 
   /* Record that a new array has been opened. */
   js->prior_element = JSON_NULL;
@@ -184,8 +229,10 @@ int json_start_array(json_stream_struct *js) {
 /* Start an named array. (A name: value pair where the value is an array.)
    Must be in an object context. */
 int json_start_array_named(json_stream_struct *js, char *name) {
+  int status;
+
   if(js->stack_depth <= 0) {
-    strcpy(js->error_string, "Attempted to start a named array without a top-level object.");
+    strcpy(js->error_string, "Attempted to start a named array when no context is open.");
     return -1;
   }
 
@@ -194,12 +241,21 @@ int json_start_array_named(json_stream_struct *js, char *name) {
     return -1;
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
+  strcpy(js->stream_buffer, "");
+
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
 
   /* Indent and print the name and open bracket. */
-  do_indent(js); 
+  status = do_indent(js); 
+  if(status) return status;
+
   sanitize_string(js, name);
-  fprintf(js->out, "\"%s\": [", name);
+  status = write_str(js, "\"");
+  status = status?status:write_str(js, name);
+  status = status?status:write_str(js, "\": [");
+  if(status) return status;
+  // ggg fprintf(js->out, "\"%s\": [", name);
 
   /* Record that a new array has been opened. */
   js->prior_element = JSON_NULL;
@@ -211,8 +267,9 @@ int json_start_array_named(json_stream_struct *js, char *name) {
 
 
   
-/* Close an array or object. */
-int json_end_context(json_stream_struct *js) {
+/* Close an array or object, shared internal-use function. */
+int json_end_context_internal(json_stream_struct *js) {
+  int status;
   JSON_TYPE open_context;
 
   if(js->stack_depth <= 0) {
@@ -222,19 +279,21 @@ int json_end_context(json_stream_struct *js) {
 
   open_context = js->object_array_stack[js->stack_depth - 1];
 
-  /*printf("DEBUG open_context %d\n", open_context);*/
-
-  js_newline(js);
+  status = js_newline(js);
+  if(status) return status;
 
   js->stack_depth--; /* Record that the object has been closed. */
 
-  do_indent(js);
+  status = do_indent(js);
+  if(status) return status;
 
   if(open_context == JSON_OBJECT) {
-    fprintf(js->out, "}");
+    status = write_str(js, "}");
+    if(status) return status;
   }
   if(open_context == JSON_ARRAY) {
-    fprintf(js->out, "]");
+    status = write_str(js, "]");
+    if(status) return status;
   }
   
   /* The newly closed element is an element in its parent context. */
@@ -244,13 +303,23 @@ int json_end_context(json_stream_struct *js) {
 };
 
 
+
+/* Close an array or object. */
+int json_end_context(json_stream_struct *js) {
+  strcpy(js->stream_buffer, "");
+  return json_end_context_internal(js);
+}
+
+
   
 /* Write a singleton value. Must be in an array context.
    String values will have enclosing quotes added. 
    Number values should be serialized as a character array prior to passing. */
 int json_write_value(json_stream_struct *js, JSON_TYPE value_type, char *value) {
+  int status;
+
   if(js->stack_depth <= 0) {
-    strcpy(js->error_string, "Attempted to print a single value when no contect is open.");
+    strcpy(js->error_string, "Attempted to print a single value when no context is open.");
     return -1;
   }
 
@@ -259,26 +328,34 @@ int json_write_value(json_stream_struct *js, JSON_TYPE value_type, char *value) 
     return -1;
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
-  do_indent(js); 
+  strcpy(js->stream_buffer, "");
+
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
+  status = do_indent(js); 
+  if(status) return status;
 
   switch(value_type) {
   case JSON_STRING:
     sanitize_string(js, value);
-    fprintf(js->out, "\"%s\"", value);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, value);
+    status = status?status:write_str(js, "\"");
+    return status;
+    // ggg fprintf(js->out, "\"%s\"", value);
     break;
   case JSON_NUMBER:
     sanitize_string(js, value);
-    fprintf(js->out, "%s", value);
+    return write_str(js, value);
     break;
   case JSON_TRUE:
-    fprintf(js->out, "true");
+    return write_str(js, "true");
     break;
   case JSON_FALSE:
-    fprintf(js->out, "false");
+    return write_str(js, "false");
     break;
   case JSON_NULL:
-    fprintf(js->out, "null");
+    return write_str(js, "null");
     break;
   default:
     strcpy(js->error_string, "Attempted to print a single value of an invalid type.");
@@ -293,6 +370,8 @@ int json_write_value(json_stream_struct *js, JSON_TYPE value_type, char *value) 
    String values will have enclosing quotes added. 
    Number values should be serialized as a character array prior to passing. */
 int json_write_pair(json_stream_struct *js, char *name, JSON_TYPE value_type, char *value) {
+  int status;
+
   if(js->stack_depth <= 0) {
     strcpy(js->error_string, "Attempted to print a pair when no context is open.");
     return -1;
@@ -303,28 +382,54 @@ int json_write_pair(json_stream_struct *js, char *name, JSON_TYPE value_type, ch
     return -1;
   }
 
-  new_element(js); /* Print a comma if this follows a previous element. */
-  do_indent(js); 
+  strcpy(js->stream_buffer, "");
 
+  status = new_element(js); /* Print a comma if this follows a previous element. */
+  if(status) return status;
+  status = do_indent(js); 
+  if(status) return status;
+
+  sanitize_string(js, name);
   switch(value_type) {
   case JSON_STRING:
-    sanitize_string(js, name);
     sanitize_string(js, value);
-    fprintf(js->out, "\"%s\": \"%s\"", name, value);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, name);
+    status = status?status:write_str(js, "\": \"");
+    status = status?status:write_str(js, value);
+    status = status?status:write_str(js, "\"");
+    return status;
+    //ggg fprintf(js->out, "\"%s\": \"%s\"", name, value);
     break;
   case JSON_NUMBER:
-    sanitize_string(js, name);
     sanitize_string(js, value);
-    fprintf(js->out, "\"%s\": %s", name, value);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, name);
+    status = status?status:write_str(js, "\": ");
+    status = status?status:write_str(js, value);
+    return status;
+    //ggg fprintf(js->out, "\"%s\": %s", name, value);
     break;
   case JSON_TRUE:
-    fprintf(js->out, "\"%s\": true", name);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, name);
+    status = status?status:write_str(js, "\": true");
+    return status;
+    // ggg fprintf(js->out, "\"%s\": true", name);
     break;
   case JSON_FALSE:
-    fprintf(js->out, "\"%s\": false", name);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, name);
+    status = status?status:write_str(js, "\": false");
+    return status;
+    //ggg fprintf(js->out, "\"%s\": false", name);
     break;
   case JSON_NULL:
-    fprintf(js->out, "\"%s\": null", name);
+    status = write_str(js, "\"");
+    status = status?status:write_str(js, name);
+    status = status?status:write_str(js, "\": null");
+    return status;
+    //ggg fprintf(js->out, "\"%s\": null", name);
     break;
   default:
     strcpy(js->error_string, "Attempted to print a name: value pair value of an invalid value type.");
@@ -340,13 +445,14 @@ int json_write_pair(json_stream_struct *js, char *name, JSON_TYPE value_type, ch
 int json_end_file(json_stream_struct *js) {
   int status;
 
-  /*printf("DEBUG stack depth %d\n", js->stack_depth);*/
   if(js->stack_depth <= 0) {
     return 0; /* File is empty or already closed. Ignore. */
   }
 
+  strcpy(js->stream_buffer, "");
+
   while(js->stack_depth > 0) {
-    status = json_end_context(js);
+    status = json_end_context_internal(js);
     if(status) return status;
   }
 

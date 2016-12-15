@@ -77,10 +77,6 @@ typedef struct {
      Discarded and overwritten at the start of each call. */
   char stream_buffer[JSON_STRING_BUFFER_LEN];
 
-  /* Tracks the length of the contents of stream_buffer after the most recent
-     function call. */
-  int buffer_len;
-
   /* Most recent error description. */
   char error_string[MAX_ERROR_STRING_LENGTH];
 
@@ -88,7 +84,7 @@ typedef struct {
   void (*string_sanitize_fn)(char *str);
 } json_stream_struct;
 
-/* Helper function to initialize a stream tracking object. */
+/* Function to initialize a stream tracking object. */
 void json_init_stream(json_stream_struct *js, int human_readable, FILE *out_file);
 
 
